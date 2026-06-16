@@ -1,0 +1,32 @@
+# Environment variables with sensitive data
+.env
+.env.local
+.env.*.local
+
+# Immich data directories (if using relative paths)
+library/
+postgres/
+model-cache/
+
+# Logs
+*.log
+
+# OS specific files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Backup files
+*.bak
+*.backup
+
+# Docker override
+docker-compose.override.yml
+compose.override.yml

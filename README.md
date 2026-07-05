@@ -41,13 +41,20 @@ Edit `.env` and update:
 
 **Optional:**
 - `TZ` — timezone (default: `America/Chicago`)
-- `IMMICH_VERSION` — `release` for latest stable, or pin a version like `v2.1.0`
+- `IMMICH_VERSION` — `v3` tracks the latest v3.x release (upstream default); pin to `v3.0.1` for zero surprises. Avoid `release` — it would auto-jump to a future v4 with breaking changes.
 
 ### 2. Create the data directories
 
+The compose file mounts host subdirectories under each parent (a small divergence from
+upstream — the parent is kept for READMEs / backup scripts, and the container sees the
+child as its data root):
+
+- `UPLOAD_LOCATION/data` → `/data` inside `immich-server`
+- `DB_DATA_LOCATION/db` → `/var/lib/postgresql/data` inside `immich_postgres`
+
 ```bash
-mkdir -p /volume1/docker/immich/library
-mkdir -p /volume1/docker/immich/postgres
+mkdir -p /volume1/docker/immich/library/data
+mkdir -p /volume1/docker/immich/postgres/db
 ```
 
 ### 3. Start the stack
@@ -74,24 +81,54 @@ docker compose up -d
 docker compose down
 ```
 
-## Hardware acceleration (optional)
+## Synology RS1221+ notes
 
-This setup runs CPU-only. To enable GPU acceleration (e.g. NVIDIA, matching the
-Jellyfin setup) you need to add the upstream hardware-acceleration compose files
-and uncomment the `extends:` blocks in `compose.yaml`:
+This stack is targeted at a Synology RS1221+.
 
-- Transcoding: <https://docs.immich.app/features/hardware-transcoding>
-- Machine learning: <https://docs.immich.app/features/ml-hardware-acceleration>
+- **CPU** — AMD Ryzen V1500B has no integrated GPU and no video encode/decode block,
+  so hardware transcoding and ML acceleration are **not available**. The stack runs
+  CPU-only; the `extends:` blocks in `compose.yaml` should stay commented out.
+- **RAM** — This NAS has been upgraded to **32 GB** (the RS1221+ maximum,
+  ECC DDR4 SODIMM). That's well above Immich's 8 GB recommended floor, so ML
+  jobs (face recognition, smart search, CLIP embedding) have plenty of headroom
+  even during the initial bulk import.
+- **Filesystem** — Btrfs/ext4 volumes on DSM are fine. Do not put
+  `DB_DATA_LOCATION` on a network share or external NTFS drive.
+- **`@eaDir`** — DSM sprays these sidecar directories through every shared folder.
+  They don't affect this stack (Immich only reads under `UPLOAD_LOCATION`), but if
+  you later add External Libraries, you'll need to escape `@eaDir` in Immich's
+  exclusion patterns.
 
-Get the matching files from the
-[current release](https://github.com/immich-app/immich/releases/latest):
-`hwaccel.transcoding.yml` and `hwaccel.ml.yml`.
+## Migrating from Synology Photos
+
+Recommended tool: **[immich-go](https://github.com/simulot/immich-go)** — a
+purpose-built CLI that reads Synology Photos exports (including album metadata
+from the DSM JSON sidecars) and uploads to Immich in bulk. It preserves
+folder-as-album structure and skips duplicates on re-runs.
+
+Rough plan:
+
+1. Bring the stack up empty and create the admin account.
+2. Create a non-admin user for yourself and generate an API key.
+3. Run `immich-go` from your desktop against a mounted SMB share of `/volume1/photo`,
+   or install the binary directly on DSM and run it locally.
+4. Verify counts, albums, and a random sample in the Immich web UI.
+5. Only *then* stop Synology Photos and reclaim its indexed cache.
+
+**Do not use an External Library for a permanent migration.** External libraries
+skip the storage template, block deletes via UI, and mix awkwardly with Synology's
+`@eaDir` folders — you'd end up re-importing later anyway.
 
 ## Backup
 
 Back up these locations:
-- **Database** — `DB_DATA_LOCATION` (or use Immich's recommended `pg_dumpall` procedure)
-- **Library** — `UPLOAD_LOCATION`
+- **Library** — `UPLOAD_LOCATION` (the `data/` subdirectory beneath it holds all originals).
+- **Database** — **do not** back up the raw Postgres directory. The Immich docs
+  explicitly recommend `pg_dump` (see the backup guide below); a raw directory copy
+  taken while the DB is running will be inconsistent.
+
+Stop `immich_server` before running the DB dump so the filesystem and DB stay
+in sync.
 
 See the official backup guide: <https://docs.immich.app/administration/backup-and-restore>
 
